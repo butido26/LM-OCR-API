@@ -1,0 +1,780 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Logistics Analysis Dashboard 物流管理表</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&family=Noto+Sans+TC:wght@400;500;700;900&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-datalabels/2.2.0/chartjs-plugin-datalabels.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+<style>
+  :root{
+    --gutter: clamp(14px, 4vw, 32px);
+    --page-max: 1440px;
+    --bg:#F2F4F7;
+    --card:#FFFFFF;
+    --border:#E5E9EF;
+    --text:#20272F;
+    --text-muted:#7A8494;
+    --orange:#E67E30;
+    --navy:#1F2937;
+    --blue:#2F6FED;
+    --blue-dim:#EAF1FE;
+    --green:#28A867;
+    --green-dim:#E7F7EF;
+
+    --c-711:#3DAA5C;
+    --c-family:#2F8FE0;
+    --c-hilife:#E14F4F;
+    --c-shopee:#F08A34;
+    --c-hct:#F0C24A;
+    --c-standard:#9B59D0;
+    --line:#334155;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html{font-size:16px;}
+  body{
+    background:var(--bg);
+    color:var(--text);
+    font-family:'Noto Sans TC', sans-serif;
+    font-size:15px;
+    line-height:1.5;
+    min-height:100vh;
+    width:100%;
+    overflow-x:hidden;
+    padding-bottom:60px;
+  }
+  .mono{font-family:'IBM Plex Mono', monospace;}
+  a{color:inherit;}
+
+  header{max-width:var(--page-max); margin:0 auto; padding:30px var(--gutter) 6px;}
+  h1.title{
+    font-family:'Space Grotesk', sans-serif;
+    font-weight:700; font-size:28px; letter-spacing:-0.01em;
+  }
+  h1.title .en{color:var(--orange);}
+  h1.title .zh{color:var(--navy); font-family:'Noto Sans TC',sans-serif; font-weight:900; margin-left:4px;}
+
+  main{max-width:var(--page-max); margin:0 auto; padding:14px var(--gutter) 0; width:100%; box-sizing:border-box;}
+
+  .card{
+    background:var(--card); border:1px solid var(--border); border-radius:14px;
+    padding:24px; box-shadow:0 1px 2px rgba(20,30,40,0.03);
+  }
+  .card + .card{margin-top:18px;}
+
+  /* upload card */
+  .upload-card{text-align:center;}
+  .dropzone{
+    border:1.5px dashed #D8A15C; border-radius:12px; padding:34px 20px;
+    background:#FFFCF7; cursor:pointer; transition:.15s;
+  }
+  .dropzone:hover{background:#FFF7EA;}
+  .dropzone .headline{color:var(--orange); font-weight:700; font-size:16px;}
+  .dropzone .sub{color:var(--text-muted); font-size:14px; margin-top:6px;}
+  .upload-actions{display:flex; gap:14px; justify-content:center; margin-top:20px; flex-wrap:wrap;}
+
+  .queue-row{
+    display:flex; align-items:center; gap:10px; padding:9px 12px; border:1px solid var(--border);
+    border-radius:8px; background:#FAFBFC; margin-top:8px; flex-wrap:wrap;
+  }
+  .queue-row .fname{flex:1; min-width:160px; font-size:14px; word-break:break-all;}
+  .queue-row select{
+    background:#fff; border:1px solid var(--border); border-radius:6px; padding:6px 8px; font-size:14px;
+  }
+  .queue-row .remove{background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:16px; padding:2px 6px;}
+  .queue-row .remove:hover{color:#E14F4F;}
+  .queue-row .status{font-size:13px; color:var(--text-muted); min-width:70px; text-align:right;}
+  .queue-row .status.ok{color:var(--green); font-weight:600;}
+  .queue-row .status.dup{color:var(--orange); font-weight:600;}
+  .queue-row .status.err{color:#E14F4F; font-weight:600;}
+
+  .btn{
+    font-family:'Noto Sans TC',sans-serif; font-weight:600; font-size:15px; cursor:pointer;
+    border-radius:8px; padding:12px 22px; border:none; transition:.15s;
+  }
+  .btn.blue{background:var(--blue); color:#fff;}
+  .btn.blue:hover{filter:brightness(1.06);}
+  .btn.green-outline{background:var(--green-dim); color:var(--green); display:inline-flex; align-items:center; gap:8px;}
+  .btn.green-outline:hover{filter:brightness(0.98);}
+  .btn.green-outline .dot{width:7px; height:7px; border-radius:50%; background:var(--green); display:inline-block;}
+  .btn.small{padding:8px 14px; font-size:14px; background:var(--blue-dim); color:var(--blue); font-weight:500;}
+
+  /* two-column analysis */
+  .grid-2{display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-top:18px; align-items:stretch;}
+  .grid-2 > .card{margin-top:0;} /* .card + .card 的堆疊間距不該套用在並排的網格欄位上 */
+  @media (max-width:900px){.grid-2{grid-template-columns:1fr;}}
+
+  .panel-head{display:flex; align-items:center; gap:8px; margin-bottom:16px; height:26px; overflow:hidden;}
+  .panel-head .icon{
+    width:26px; height:26px; border-radius:6px; display:flex; align-items:center; justify-content:center;
+    background:var(--blue-dim); color:var(--blue); flex-shrink:0; overflow:hidden;
+  }
+  .panel-head .icon-dot{width:9px; height:9px; border-radius:50%; background:var(--blue); display:block;}
+  .panel-head h2{font-size:17px; font-weight:700; line-height:26px; margin:0;}
+
+  .filter-row{display:flex; gap:14px; flex-wrap:wrap; margin-bottom:18px;}
+  .field{display:flex; flex-direction:column; gap:6px; flex:1; min-width:150px;}
+  .field label{font-size:14px; color:var(--text-muted); font-weight:500;}
+  .field input, .field select{
+    background:#fff; border:1px solid var(--border); color:var(--text);
+    padding:10px 10px; border-radius:7px; font-family:'Noto Sans TC',sans-serif; font-size:15px;
+  }
+
+  .stat-row{display:grid; grid-template-columns:repeat(auto-fit, minmax(85px, 1fr)); gap:10px; margin-bottom:18px;}
+  @media (max-width:520px){.stat-row{grid-template-columns:repeat(3,1fr);}}
+  .stat{
+    background:#FAFBFC; border:1px solid var(--border); border-radius:10px; padding:12px 6px;
+    text-align:center;
+  }
+  .stat .name{font-size:14px; color:var(--text-muted); margin-bottom:4px;}
+  .stat .val{font-family:'IBM Plex Mono',monospace; font-size:20px; font-weight:700; color:var(--c);}
+
+  .range-label{font-size:14px; color:var(--text-muted); margin:-6px 0 14px;}
+
+  canvas{max-width:100%; display:block;}
+  .chart-wrap{position:relative; width:100%; height:260px; overflow:hidden;}
+  .chart-wrap canvas{width:100% !important; height:100% !important;}
+
+  .table-wrap{overflow-x:auto; -webkit-overflow-scrolling:touch;}
+  table{width:100%; min-width:640px; border-collapse:collapse; font-size:14px;}
+  th{
+    text-align:left; font-size:14px; font-weight:600; color:var(--text-muted);
+    padding:10px 10px; border-bottom:1px solid var(--border); background:#FAFBFC; white-space:nowrap;
+  }
+  td{padding:11px 10px; border-bottom:1px solid #F0F2F5; white-space:nowrap;}
+  tr:last-child td{border-bottom:none;}
+  .badge{
+    display:inline-flex; align-items:center; gap:6px; font-size:14px; font-weight:600;
+    padding:4px 10px; border-radius:20px; background:var(--green-dim); color:var(--green);
+  }
+  .badge .dot{width:6px; height:6px; border-radius:50%; background:var(--green);}
+
+  footer{max-width:var(--page-max); margin:24px auto 0; padding:0 var(--gutter); color:var(--text-muted); font-size:14px;}
+
+  @media (max-width:768px){
+    .stat-row{grid-template-columns:repeat(3,1fr);}
+  }
+
+  @media (max-width:640px){
+    header{padding-top:22px; padding-bottom:4px;}
+    main{padding-top:12px;}
+    .card{padding:16px; border-radius:12px;}
+    h1.title{font-size:21px; display:flex; flex-direction:column; gap:2px;}
+    h1.title .zh{margin-left:0;}
+    .upload-actions{flex-direction:column;}
+    .upload-actions .btn{width:100%;}
+    .dropzone{padding:24px 12px;}
+    .chart-wrap{height:220px;}
+  }
+  @media (max-width:380px){
+    :root{ --gutter: 10px; }
+    .card{padding:14px;}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1 class="title"><span class="en">Logistics Analysis Dashboard</span> <span class="zh"> 物流管理分析</span></h1>
+</header>
+
+<main>
+
+  <div class="card upload-card">
+    <div class="mode-selector" style="display:flex; gap:20px; margin-bottom:14px; font-size:14px;">
+      <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+        <input type="radio" name="ocr-mode" value="free" checked> 免費 OCR 辨識
+      </label>
+      <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+        <input type="radio" name="ocr-mode" value="paid"> 付費 API 辨識
+        <span style="color:#999; font-size:12px;">（Vision API，依實際頁數計費，送出前會再次確認）</span>
+      </label>
+    </div>
+    <div class="dropzone" id="dropzone">
+      <div class="headline">＋ 將物流PDF面單拖曳至此，或點擊選擇檔案</div>
+      <div class="sub">PDF可以一張或一份多頁的資料上傳，較大的檔案會自動先拆成小份再送出</div>
+      <input type="file" id="file-input" accept="application/pdf" multiple hidden>
+    </div>
+    <div id="queue-list" style="text-align:left; margin-top:14px;"></div>
+    <div class="upload-actions">
+      <button class="btn blue" id="parse-btn" onclick="startUpload()">開始解析上傳</button>
+      <a href="#" id="open-sheet-btn-top" class="btn green-outline"><span class="dot"></span>前往查看Excel明細</a>
+    </div>
+  </div>
+
+  <div id="summary-modal-overlay" style="display:none; position:fixed; inset:0; background:rgba(20,25,32,0.55); z-index:1000; align-items:center; justify-content:center; padding:20px;">
+    <div style="background:#fff; border-radius:14px; max-width:560px; width:100%; max-height:80vh; overflow-y:auto; padding:24px; box-shadow:0 10px 40px rgba(0,0,0,0.25);">
+      <div id="summary-modal-body" style="white-space:pre-wrap; font-size:14px; line-height:1.6; color:var(--text); margin-bottom:20px;"></div>
+      <div id="summary-modal-actions" style="display:flex; gap:10px; justify-content:flex-end;"></div>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <!-- 分析欄位1 -->
+    <div class="card">
+      <div class="panel-head"><span class="icon"><span class="icon-dot"></span></span><h2>物流分佈統計</h2></div>
+      <div class="filter-row">
+        <div class="field"><label>開始日期</label><input type="date" id="stat-start"></div>
+        <div class="field"><label>結束日期</label><input type="date" id="stat-end"></div>
+        <div class="field"><label>&nbsp;</label><button class="btn blue" onclick="renderStats()">套用篩選</button></div>
+      </div>
+      <div class="stat-row" id="stat-grid"></div>
+      <p class="range-label" id="stat-range-label"></p>
+      <div class="chart-wrap"><canvas id="statChart"></canvas></div>
+    </div>
+
+    <!-- 分析欄位2 -->
+    <div class="card">
+      <div class="panel-head"><span class="icon"><span class="icon-dot"></span></span><h2>營運趨勢分析</h2></div>
+      <div class="filter-row">
+        <div class="field">
+          <label>時間單位</label>
+          <select id="trend-unit" onchange="onUnitChange()">
+            <option value="day">按日分析（最多31天）</option>
+            <option value="month" selected>按月分析</option>
+          </select>
+        </div>
+        <div class="field">
+          <label id="trend-range-label">選擇月份區間</label>
+          <div style="display:flex; gap:6px;">
+            <input type="month" id="trend-start">
+            <input type="month" id="trend-end">
+          </div>
+        </div>
+      </div>
+      <div class="filter-row" style="margin-bottom:8px;">
+        <div class="field">
+          <label>物流管道</label>
+          <select id="trend-carrier">
+            <option value="all">全部物流</option>
+            <option value="711">7-11</option>
+            <option value="family">全家</option>
+            <option value="hilife">萊爾富</option>
+            <option value="shopee">店到家</option>
+            <option value="hct">HCT</option>
+            <option value="standard">標準配送</option>
+            <option value="kerry">嘉里快遞</option>
+          </select>
+        </div>
+        <div class="field"><label>&nbsp;</label><button class="btn blue" onclick="renderTrend()">套用篩選</button></div>
+      </div>
+      <p class="range-label" id="trend-range-label-text"></p>
+      <div class="chart-wrap"><canvas id="trendChart"></canvas></div>
+    </div>
+  </div>
+
+</main>
+
+<footer>圖表為Excel明細資料</footer>
+
+<script>
+Chart.register(ChartDataLabels);
+
+/* ====== 後端 API 設定 ======
+   部署好 Apps Script 網頁應用程式後，把網址貼在這裡（.../exec 結尾）。
+   留空字串 = 使用畫面內建的示範假資料，方便還沒串接後端時先看畫面效果。 */
+const API_URL_FREE = 'https://script.google.com/macros/s/AKfycbxBf1blkJghciYHOulCySsHgnym24522f7dhJnUJjxAu4DRViT3Kr1pTh4fIrXAskb0Ug/exec'; // 免費版（Drive OCR）
+const API_URL_PAID = '請貼上付費版（Vision API）部署後的網址'; // 付費版
+
+async function apiGet_(params){
+  if(!API_URL_FREE) return null;
+  try{
+    const qs = new URLSearchParams(params).toString();
+    const res = await fetch(`${API_URL_FREE}?${qs}`);
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    return await res.json();
+  }catch(err){
+    console.warn('API 讀取失敗，改用示範資料', err);
+    return null;
+  }
+}
+
+const CARRIERS = [
+  {key:'711',      name:'7-11',     color:'#3DAA5C'},
+  {key:'family',   name:'全家',     color:'#2F8FE0'},
+  {key:'hilife',   name:'萊爾富',   color:'#E14F4F'},
+  {key:'shopee',   name:'店到家',   color:'#F08A34'},
+  {key:'hct',      name:'HCT',      color:'#F0C24A'},
+  {key:'standard', name:'標準配送', color:'#9B59D0'},
+  {key:'kerry',    name:'嘉里快遞', color:'#14B8A6'},
+];
+
+/* ---------- mock data helpers ---------- */
+function seededRandom(seed){ let s=seed; return ()=>{ s = (s*9301+49297)%233280; return s/233280; }; }
+function dailyCounts(dateStr, key){
+  const seed = Number(dateStr.split('-').join('')) + key.length*97;
+  const rnd = seededRandom(seed);
+  const base = {'711':4,'family':4,'hilife':5,'shopee':6,'hct':9,'standard':10}[key] || 5;
+  return Math.max(0, Math.round(base + (rnd()-0.5)*base*0.8));
+}
+function pad(n){ return String(n).padStart(2,'0'); }
+function daysBetween(start,end){
+  const days=[]; let d=new Date(start+'T00:00:00'); const e=new Date(end+'T00:00:00');
+  while(d<=e){ days.push(d.toISOString().slice(0,10)); d.setDate(d.getDate()+1); }
+  return days;
+}
+function monthsBetween(startYm, endYm){
+  const out=[]; let [sy,sm]=startYm.split('-').map(Number); const [ey,em]=endYm.split('-').map(Number);
+  while(sy<ey || (sy===ey && sm<=em)){ out.push(`${sy}-${pad(sm)}`); sm++; if(sm>12){sm=1; sy++;} }
+  return out;
+}
+function daysInMonth(ym){ const [y,m]=ym.split('-').map(Number); return new Date(y,m,0).getDate(); }
+function sumForDate(d, carrierSel){
+  if(carrierSel==='all') return CARRIERS.reduce((s,c)=> s+dailyCounts(d,c.key),0);
+  return dailyCounts(d, carrierSel);
+}
+
+/* ---------- 分析欄位1：物流分佈統計 ---------- */
+let statChart;
+async function renderStats(){
+  const start = document.getElementById('stat-start').value;
+  const end = document.getElementById('stat-end').value;
+
+  const apiData = await apiGet_({action:'stats', start, end});
+  let totals;
+  if(apiData && apiData.counts){
+    totals = CARRIERS.map(c=> apiData.counts[c.name] || 0);
+  } else {
+    const days = daysBetween(start,end);
+    totals = CARRIERS.map(c=> days.reduce((sum,d)=> sum + dailyCounts(d,c.key), 0));
+  }
+  document.getElementById('stat-range-label').textContent = `區間：${start} ～ ${end}`;
+
+  const grid = document.getElementById('stat-grid');
+  grid.innerHTML = '';
+  CARRIERS.forEach((c,i)=>{
+    grid.insertAdjacentHTML('beforeend', `
+      <div class="stat" style="--c:${c.color}">
+        <div class="name">${c.name}</div>
+        <div class="val">${totals[i]}</div>
+      </div>`);
+  });
+
+  if(statChart) statChart.destroy();
+  statChart = new Chart(document.getElementById('statChart'), {
+    type:'bar',
+    data:{ labels: CARRIERS.map(c=>c.name), datasets:[{ data: totals, backgroundColor: CARRIERS.map(c=>c.color), borderRadius:6, maxBarThickness:52 }] },
+    options:{
+      responsive:true,
+      maintainAspectRatio:false,
+      plugins:{
+        legend:{display:false},
+        tooltip:{enabled:false},
+        datalabels:{ anchor:'end', align:'top', offset:6, color:'#4B5563', font:{size:13, weight:'600', family:"'IBM Plex Mono'"}, formatter:v=>v+'件' }
+      },
+      layout:{padding:{top:28}},
+      scales:{
+        x:{ grid:{display:false}, ticks:{color:'#4B5563', font:{family:"'Noto Sans TC'", size:13}} },
+        y:{ display:false, grid:{display:false} }
+      }
+    }
+  });
+}
+
+/* ---------- 日期輔助函式 ---------- */
+function pad2_(n){ return String(n).padStart(2,'0'); }
+function toDateStr_(d){ return `${d.getFullYear()}-${pad2_(d.getMonth()+1)}-${pad2_(d.getDate())}`; }
+function toMonthStr_(d){ return `${d.getFullYear()}-${pad2_(d.getMonth()+1)}`; }
+function addDays_(d, n){ const r = new Date(d); r.setDate(r.getDate()+n); return r; }
+function addMonths_(d, n){ const r = new Date(d.getFullYear(), d.getMonth()+n, 1); return r; }
+function startOfMonth_(d){ return new Date(d.getFullYear(), d.getMonth(), 1); }
+
+/* ---------- 分析欄位2：出貨趨勢追蹤 ---------- */
+function onUnitChange(){
+  const mode = document.getElementById('trend-unit').value;
+  const s = document.getElementById('trend-start');
+  const e = document.getElementById('trend-end');
+  const today = new Date();
+  document.getElementById('trend-range-label').textContent = mode==='day' ? '選擇日期區間' : '選擇月份區間';
+  if(mode==='day'){
+    s.type='date'; e.type='date';
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(s.value)){
+      s.value = toDateStr_(addDays_(today, -30)); // 預設今天往前30天
+      e.value = toDateStr_(today); // 預設今天
+    }
+  } else {
+    s.type='month'; e.type='month';
+    if(!/^\d{4}-\d{2}$/.test(s.value)){
+      s.value = toMonthStr_(addMonths_(today, -3)); // 預設當月往前3個月
+      e.value = toMonthStr_(today); // 預設當月
+    }
+  }
+}
+
+let trendChart;
+async function renderTrend(){
+  const mode = document.getElementById('trend-unit').value;
+  const carrierSel = document.getElementById('trend-carrier').value;
+  const start = document.getElementById('trend-start').value;
+  const end = document.getElementById('trend-end').value;
+
+  let labels, values, rangeText;
+  const carrierName = carrierSel==='all' ? '全部物流' : CARRIERS.find(c=>c.key===carrierSel).name;
+
+  const apiData = await apiGet_({action:'trend', mode, start, end, carrier: carrierSel==='all' ? 'all' : carrierName});
+
+  if(apiData && apiData.labels){
+    labels = apiData.labels;
+    values = apiData.values;
+    rangeText = mode==='day'
+      ? `區間：${start} ～ ${end}　·　${carrierName}`
+      : `區間：${start} ～ ${end}　·　${carrierName}`;
+  } else if(mode==='day'){
+    const days = daysBetween(start, end);
+    labels = days.map(d=> d.slice(5));
+    values = days.map(d=> sumForDate(d, carrierSel));
+    rangeText = `區間：${start} ～ ${end}　·　${carrierName}`;
+  } else {
+    if(start===end){
+      const ym = start; const n = daysInMonth(ym);
+      const days = Array.from({length:n},(_,i)=>`${ym}-${pad(i+1)}`);
+      labels = days.map(d=>d.slice(5));
+      values = days.map(d=>sumForDate(d, carrierSel));
+      rangeText = `月份：${ym}（依日拆解，共 ${n} 天）　·　${carrierName}`;
+    } else {
+      const months = monthsBetween(start,end);
+      labels = months;
+      values = months.map(ym=>{
+        const days = Array.from({length:daysInMonth(ym)},(_,i)=>`${ym}-${pad(i+1)}`);
+        return days.reduce((s,d)=>s+sumForDate(d, carrierSel),0);
+      });
+      rangeText = `區間：${start} ～ ${end}（月總計）　·　${carrierName}`;
+    }
+  }
+  document.getElementById('trend-range-label-text').textContent = rangeText;
+
+  const color = carrierSel==='all' ? '#334155' : CARRIERS.find(c=>c.key===carrierSel).color;
+
+  if(trendChart) trendChart.destroy();
+  trendChart = new Chart(document.getElementById('trendChart'), {
+    type:'line',
+    data:{ labels, datasets:[{ data: values, borderColor:color, backgroundColor:color+'14', pointBackgroundColor:'#fff', pointBorderColor:color, pointBorderWidth:2, pointRadius:4, tension:.35, borderWidth:2.5, fill:true }] },
+    options:{
+      responsive:true,
+      maintainAspectRatio:false,
+      plugins:{
+        legend:{display:false},
+        tooltip:{enabled:false},
+        datalabels:{ anchor:'end', align:'top', offset:6, color:'#4B5563', font:{size:13, weight:'600', family:"'IBM Plex Mono'"}, formatter:v=>v }
+      },
+      layout:{padding:{top:28}},
+      scales:{
+        x:{ grid:{display:false}, ticks:{color:'#7A8494', maxRotation:0, autoSkip:true, font:{family:"'IBM Plex Mono'", size:12}} },
+        y:{ display:false, grid:{display:false} }
+      }
+    }
+  });
+}
+
+/* ---------- 自訂提示視窗（取代瀏覽器原生 alert/confirm，避免非同步流程後被瀏覽器悄悄擋掉不顯示） ---------- */
+function showSummaryModal_(message, choices){
+  return new Promise(resolve=>{
+    const overlay = document.getElementById('summary-modal-overlay');
+    const body = document.getElementById('summary-modal-body');
+    const actions = document.getElementById('summary-modal-actions');
+    body.textContent = message;
+    actions.innerHTML = '';
+
+    function close(result){
+      overlay.style.display = 'none';
+      resolve(result);
+    }
+
+    function addBtn(label, value, primary){
+      const el = document.createElement('button');
+      el.className = primary ? 'btn blue' : 'btn';
+      if(!primary){ el.style.background = '#EEF1F5'; el.style.color = 'var(--text)'; }
+      el.textContent = label;
+      el.onclick = ()=> close(value);
+      actions.appendChild(el);
+    }
+
+    if(Array.isArray(choices)){
+      // 多按鈕模式：choices 是 [{label, value, primary?}, ...]，依序放入，resolve 對應的 value
+      choices.forEach(c=> addBtn(c.label, c.value, c.primary));
+    } else if(choices){
+      // 舊版二選一模式，維持相容：resolve true/false
+      addBtn(choices.cancelLabel, false, false);
+      addBtn(choices.confirmLabel, true, true);
+    } else {
+      addBtn('確定', true, true);
+    }
+
+    overlay.style.display = 'flex';
+  });
+}
+
+/* ---------- Excel 明細連結 ---------- */
+const SHEET_URL = 'https://docs.google.com/spreadsheets/d/1TxwaXwCaIQ-ivKNms6PJek4wCnV9dUOXktFTyK1ZKts/edit?gid=549650849#gid=549650849';
+function openSheet(e){
+  e.preventDefault();
+  if(!SHEET_URL){ alert('尚未設定 Excel 表單網址，請在 index.html 的 SHEET_URL 填入 Google Sheet 連結'); return; }
+  window.open(SHEET_URL, '_blank');
+}
+document.getElementById('open-sheet-btn-top').addEventListener('click', openSheet);
+
+/* ---------- 上傳佇列（拖曳 / 選擇檔案） ---------- */
+
+const QUEUE_LIST_THRESHOLD = 20; // 檔案數在這個數字以下才逐筆列出，超過只顯示總數摘要（2000 筆逐筆渲染會很卡）
+
+let queue = []; // {id, file, kind:'pdf', pageCount, label}
+let seq = 0;
+
+const MAX_PAGES_PER_CHUNK = 40; // 單次 OCR 轉檔頁數上限，超過就先在瀏覽器端拆開。原本設 20，但發現瀏覽器端拆分品質不穩定（拆完只剩前幾頁能讀到），先調高減少拆分次數，同時修正下面的存檔方式
+
+// 把一個 File 物件包成一個新的、只含指定頁碼範圍的 PDF File（用 pdf-lib 在瀏覽器端處理，不用送到後端）
+const ENABLE_CLIENT_SPLIT = false; // 關閉瀏覽器端拆分：實測發現用 pdf-lib 重新存檔切分，大部分頁面內容會不見（不拆分反而成功率高很多），先關掉改整份送出
+
+async function splitPdfFile_(file, maxPages){
+  const bytes = await file.arrayBuffer();
+  const srcDoc = await PDFLib.PDFDocument.load(bytes, { ignoreEncryption: true });
+  const totalPages = srcDoc.getPageCount();
+  if(!ENABLE_CLIENT_SPLIT || totalPages <= maxPages) return [{ file, pageCount: totalPages, label: file.name }];
+
+  const chunks = [];
+  const totalChunks = Math.ceil(totalPages / maxPages);
+  for(let c=0; c<totalChunks; c++){
+    const start = c*maxPages;
+    const end = Math.min(start+maxPages, totalPages);
+    const newDoc = await PDFLib.PDFDocument.create();
+    const indices = Array.from({length: end-start}, (_,i)=> start+i);
+    const copiedPages = await newDoc.copyPages(srcDoc, indices);
+    copiedPages.forEach(p=> newDoc.addPage(p));
+    const newBytes = await newDoc.save({ useObjectStreams: false });
+    const partName = file.name.replace(/\.pdf$/i, '') + `_第${c+1}份.pdf`;
+    const newFile = new File([newBytes], partName, { type: 'application/pdf' });
+    chunks.push({ file: newFile, pageCount: end-start, label: `${file.name}（第${c+1}/${totalChunks}份，共${totalPages}頁）` });
+  }
+  return chunks;
+}
+
+async function addFiles(fileList){
+  const files = Array.from(fileList).filter(f=> f.name.toLowerCase().endsWith('.pdf'));
+  if(!files.length) return;
+
+  for(const file of files){
+    try{
+      const parts = await splitPdfFile_(file, MAX_PAGES_PER_CHUNK);
+      parts.forEach(p=>{
+        queue.push({ id: seq++, file: p.file, kind: 'pdf', pageCount: p.pageCount, label: p.label });
+      });
+    }catch(err){
+      // 拆分失敗（例如檔案損毀），仍然把原始檔案加入佇列，讓後端照樣試著處理，只是不知道正確頁數就不做頁數比對
+      queue.push({ id: seq++, file, kind: 'pdf', pageCount: null, label: file.name + '（無法預先判斷頁數）' });
+    }
+  }
+  renderQueue();
+}
+
+function renderQueue(){
+  const el = document.getElementById('queue-list');
+  if(queue.length === 0){ el.innerHTML = ''; return; }
+
+  if(queue.length > QUEUE_LIST_THRESHOLD){
+    el.innerHTML = `
+      <div class="queue-row">
+        <span class="fname">已加入 <b>${queue.length}</b> 個檔案（含自動拆分後的份數；物流商將依內容自動判斷，數量較多不逐筆列出）</span>
+        <button class="remove" onclick="clearQueue()" style="font-size:13px;">清空全部</button>
+      </div>`;
+    return;
+  }
+
+  el.innerHTML = queue.map(q=>`
+    <div class="queue-row" data-id="${q.id}">
+      <span class="fname mono">${q.label || q.file.name}</span>
+      <span class="status" id="qstatus-${q.id}">待上傳</span>
+      <button class="remove" onclick="removeQueue(${q.id})">✕</button>
+    </div>`).join('');
+}
+function removeQueue(id){ queue = queue.filter(x=>x.id!==id); renderQueue(); }
+function clearQueue(){ queue = []; renderQueue(); }
+
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('file-input');
+dropzone.addEventListener('click', ()=> fileInput.click());
+fileInput.addEventListener('change', e=>{ addFiles(e.target.files); fileInput.value=''; });
+['dragover','dragenter'].forEach(evt=> dropzone.addEventListener(evt, e=>{ e.preventDefault(); dropzone.style.background='#FFF3E0'; }));
+['dragleave','drop'].forEach(evt=> dropzone.addEventListener(evt, e=>{ e.preventDefault(); dropzone.style.background=''; }));
+dropzone.addEventListener('drop', e=>{ addFiles(e.dataTransfer.files); });
+
+function fileToBase64_(file){
+  return new Promise((resolve,reject)=>{
+    const reader = new FileReader();
+    reader.onload = ()=> resolve(reader.result.split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+const BATCH_SIZE = ENABLE_CLIENT_SPLIT ? 5 : 1; // 沒有先拆分的話，一個檔案可能就很大，一次只送一個檔案，讓它獨享整個 6 分鐘執行時間
+const VISION_EST_USD_PER_1000_PAGES = 1.5; // 只用於顯示「大概金額」給使用者參考，不是精確計費，實際費用以 Google 帳單為準
+
+// 從警示/異常的檔名（可能帶有「（第N頁）」這種後綴）比對回原始佇列項目，且不重複
+function matchQueueItemsByLabel_(sourceQueue, labels){
+  const baseNames = new Set(labels.map(l => l.replace(/（第\d+[頁張].*?）\s*$/, '')));
+  const matched = [];
+  const seen = new Set();
+  sourceQueue.forEach(q=>{
+    if(baseNames.has(q.file.name) && !seen.has(q.id)){
+      seen.add(q.id);
+      matched.push(q);
+    }
+  });
+  return matched;
+}
+
+async function confirmPaidUsage_(items){
+  const totalPages = items.reduce((sum,q)=> sum + (q.pageCount || 1), 0);
+  const estCost = (totalPages / 1000 * VISION_EST_USD_PER_1000_PAGES).toFixed(2);
+  const msg = `即將使用付費 Vision API 辨識\n\n檔案數：${items.length} 個\n預估總頁數：約 ${totalPages} 頁\n預估費用：約 US$${estCost}（僅供參考，實際費用以 Google Cloud 帳單為準）\n\n確定要送出嗎？`;
+  return await showSummaryModal_(msg, [
+    { label: '取消', value: false },
+    { label: '確定使用付費API', value: true, primary: true }
+  ]);
+}
+
+async function startUpload(mode, queueOverride){
+  mode = mode || document.querySelector('input[name="ocr-mode"]:checked').value;
+  const apiUrl = mode === 'paid' ? API_URL_PAID : API_URL_FREE;
+  const isRetry = !!queueOverride; // 是不是「免費版失敗後，改用付費API重跑」這個流程
+
+  if(!apiUrl || !apiUrl.startsWith('http')){ await showSummaryModal_(`尚未設定${mode === 'paid' ? '付費版' : '免費版'}後端網址，請確認 API_URL_${mode === 'paid' ? 'PAID' : 'FREE'} 已填入正確的網址`); return; }
+
+  const currentQueue = queueOverride || queue;
+  if(currentQueue.length===0){ await showSummaryModal_('請先加入要上傳的 PDF 檔案'); return; }
+
+  if(mode === 'paid'){
+    const confirmed = await confirmPaidUsage_(currentQueue);
+    if(!confirmed) return;
+  }
+
+  const btn = document.getElementById('parse-btn');
+  const original = btn ? btn.textContent : '';
+  if(btn) btn.disabled = true;
+  if(!isRetry) currentQueue.forEach(q=> { const el = document.getElementById('qstatus-'+q.id); if(el) el.textContent = '排隊中'; });
+
+  const totals = { inserted:0, duplicateCount:0, duplicates:[], needsReview:[], failed:[], warnings:[] };
+  const sortedQueue = [...currentQueue].sort((a,b)=> a.file.name.localeCompare(b.file.name));
+  const chunks = [];
+  for(let i=0;i<sortedQueue.length;i+=BATCH_SIZE) chunks.push(sortedQueue.slice(i,i+BATCH_SIZE));
+
+  try{
+    for(let c=0; c<chunks.length; c++){
+      const chunk = chunks[c];
+      if(btn) btn.textContent = `${mode === 'paid' ? '付費' : '免費'}解析上傳中...（${Math.min((c+1)*BATCH_SIZE, currentQueue.length)}/${currentQueue.length}）`;
+      if(!isRetry) chunk.forEach(q=> { const el = document.getElementById('qstatus-'+q.id); if(el) el.textContent = '處理中'; });
+
+      const items = await Promise.all(chunk.map(async q=>{
+        const base64 = await fileToBase64_(q.file);
+        const item = { carrierType: 'auto', filename: q.file.name, pageCount: q.pageCount || undefined };
+        item[q.kind === 'zip' ? 'zipBase64' : 'pdfBase64'] = base64;
+        return item;
+      }));
+
+      const res = await fetch(apiUrl, {
+        method:'POST',
+        headers:{ 'Content-Type':'text/plain;charset=utf-8' }, // 避免觸發瀏覽器 CORS 預檢請求
+        body: JSON.stringify(items)
+      });
+      const data = await res.json();
+      if(!data.success) throw new Error(`第 ${c+1}/${chunks.length} 批上傳失敗：${data.error || '未知錯誤'}`);
+
+      totals.inserted += data.insertedCount;
+      totals.duplicateCount += data.duplicateCount;
+      totals.duplicates.push(...(data.duplicates?.first5 || []), ...(data.duplicates?.last5 || []));
+      totals.needsReview.push(...(data.needsReview || []));
+      totals.failed.push(...(data.failed || []));
+      totals.warnings.push(...(data.warnings || []));
+    }
+
+    let msg = `全部上傳完成（${mode === 'paid' ? '付費 API' : '免費 OCR'}）：新增 ${totals.inserted} 筆`;
+    if(totals.duplicateCount > 0){
+      msg += `，重複略過 ${totals.duplicateCount} 筆（訂單編號已存在，不重複列出）`;
+    }
+
+    // 把警示/異常訊息依「問題類型」歸類，同一種問題只描述一次，底下列出檔名（依字母排序），比較省版面
+    function normalizeReason_(reason){
+      if(/頁數.*但只拆出|可能有頁面因為關鍵字/.test(reason)) return '瀏覽器偵測頁數跟拆出張數不符，可能有面單被誤合併，建議人工複查';
+      if(/這一頁.*沒有讀到任何文字/.test(reason)) return '這幾頁 Vision API 沒有讀到任何文字，建議人工複查';
+      if(/無法自動判斷物流商/.test(reason)) return '無法自動判斷物流商，請手動指定';
+      if(/抓不到任何文字內容/.test(reason)) return 'PDF 抓不到文字內容（可能是圖片型 PDF，OCR 也沒抓到）';
+      return reason;
+    }
+    function groupByReason_(list){
+      const groups = {};
+      list.forEach(item=>{
+        const key = normalizeReason_(item.reason || '未知原因');
+        (groups[key] = groups[key] || []).push(item.filename);
+      });
+      return Object.entries(groups).map(([reason, names])=>{
+        names.sort((a,b)=>a.localeCompare(b));
+        return `【${reason}】共 ${names.length} 筆\n${names.join('、')}`;
+      });
+    }
+
+    if(totals.warnings.length){
+      msg += `\n\n🔍 需人工複查（共 ${totals.warnings.length} 筆）：\n` + groupByReason_(totals.warnings).join('\n\n');
+    }
+
+    const anomalies = [...totals.needsReview, ...totals.failed]; // 無法判斷物流商 + 其他解析失敗，合併當作「異常」處理
+    const allProblems = [...totals.warnings, ...anomalies]; // 「需人工複查」+「異常」都算是「這次沒有完整處理好」，可以拿去給付費版重跑
+
+    if(anomalies.length || (mode === 'free' && totals.warnings.length)){
+      if(anomalies.length){
+        msg += `\n\n⚠️ 異常（共 ${anomalies.length} 筆）：\n` + groupByReason_(anomalies).join('\n\n');
+      }
+
+      const buttons = [
+        { label: '整批重新排入佇列', value: 'requeue' },
+        { label: `排除問題 ${allProblems.length} 筆`, value: 'exclude', primary: mode === 'paid' }
+      ];
+      // 只有「免費模式」跑出問題時，才提供「改用付費API重新處理」這個選項；付費模式本身跑出的問題，不會再有更貴的選項可以往上升級
+      if(mode === 'free' && allProblems.length && API_URL_PAID && API_URL_PAID.startsWith('http')){
+        buttons.push({ label: `改用付費API重新處理這 ${allProblems.length} 筆`, value: 'retry-paid', primary: true });
+      }
+
+      const choice = await showSummaryModal_(msg, buttons);
+
+      if(choice === 'retry-paid'){
+        const matched = matchQueueItemsByLabel_(currentQueue, allProblems.map(p=>p.filename));
+        if(!isRetry) { queue = []; renderQueue(); } // 免費版這批先從佇列移除，避免混淆
+        if(btn){ btn.textContent = original; btn.disabled = false; }
+        await startUpload('paid', matched); // 遞迴呼叫，直接用付費模式重跑這幾份原始檔案
+        return;
+      } else if(choice === 'requeue'){
+        if(!isRetry) queue = currentQueue; // 整批放回佇列，交給重複判斷機制去避免真正重複寫入
+      } else {
+        if(!isRetry) queue = [];
+      }
+    } else {
+      await showSummaryModal_(msg);
+      if(!isRetry) queue = [];
+    }
+
+    if(!isRetry){
+      renderQueue();
+    }
+    renderStats();
+    renderTrend();
+  }catch(err){
+    await showSummaryModal_('上傳中斷：'+ err.message + '\n\n已成功送出的批次不會受影響，可以重新整理頁面或再次點擊上傳處理剩餘檔案。');
+  }finally{
+    if(btn){ btn.textContent = original; btn.disabled = false; }
+  }
+}
+
+/* ---------- init ---------- */
+(function initDefaults_(){
+  const today = new Date();
+  document.getElementById('stat-start').value = toDateStr_(startOfMonth_(today)); // 預設當月1號
+  document.getElementById('stat-end').value = toDateStr_(today); // 預設今天
+})();
+onUnitChange();
+renderStats();
+renderTrend();
+</script>
+</body>
+</html>
