@@ -276,8 +276,8 @@ Chart.register(ChartDataLabels);
 /* ====== 後端 API 設定 ======
    部署好 Apps Script 網頁應用程式後，把網址貼在這裡（.../exec 結尾）。
    留空字串 = 使用畫面內建的示範假資料，方便還沒串接後端時先看畫面效果。 */
-const API_URL_FREE = 'https://script.google.com/macros/s/AKfycbxBf1blkJghciYHOulCySsHgnym24522f7dhJnUJjxAu4DRViT3Kr1pTh4fIrXAskb0Ug/exec'; // 免費版（Drive OCR）
-const API_URL_PAID = '請貼上付費版（Vision API）部署後的網址'; // 付費版
+const API_URL_FREE = 'https://script.google.com/macros/s/AKfycbxOP1ciDe9KDCBCmSBzubbEGMdn4sjtGigVwVOzD2XAFrsD7cmMrG08kYZNOO5EQfd0kQ/exec'; // 免費版（Drive OCR）
+const API_URL_PAID = 'https://script.google.com/macros/s/AKfycbydMxJZcFkIWoXmKpwsIS69GTy6CQykH6IoBx3h_7_ZsiXJ4jY8NDbCsBpYLmBCfOvh/exec'; // 付費版
 
 async function apiGet_(params){
   if(!API_URL_FREE) return null;
