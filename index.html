@@ -276,8 +276,8 @@ Chart.register(ChartDataLabels);
 /* ====== 後端 API 設定 ======
    部署好 Apps Script 網頁應用程式後，把網址貼在這裡（.../exec 結尾）。
    留空字串 = 使用畫面內建的示範假資料，方便還沒串接後端時先看畫面效果。 */
-const API_URL_FREE = 'https://script.google.com/macros/s/AKfycbxOP1ciDe9KDCBCmSBzubbEGMdn4sjtGigVwVOzD2XAFrsD7cmMrG08kYZNOO5EQfd0kQ/exec'; // 免費版（Drive OCR）
-const API_URL_PAID = 'https://script.google.com/macros/s/AKfycbydMxJZcFkIWoXmKpwsIS69GTy6CQykH6IoBx3h_7_ZsiXJ4jY8NDbCsBpYLmBCfOvh/exec'; // 付費版
+const API_URL_FREE = 'https://script.google.com/macros/s/AKfycbxBf1blkJghciYHOulCySsHgnym24522f7dhJnUJjxAu4DRViT3Kr1pTh4fIrXAskb0Ug/exec'; // 免費版（Drive OCR）
+const API_URL_PAID = '請貼上付費版（Vision API）部署後的網址'; // 付費版
 
 async function apiGet_(params){
   if(!API_URL_FREE) return null;
@@ -508,7 +508,7 @@ function showSummaryModal_(message, choices){
 }
 
 /* ---------- Excel 明細連結 ---------- */
-const SHEET_URL = 'https://docs.google.com/spreadsheets/d/1cSRzPt5coq0GyWe7lfy1qnULGAb7X96GBSCIE-YMb-k/edit?pli=1&gid=498510256#gid=498510256';
+const SHEET_URL = 'https://docs.google.com/spreadsheets/d/1TxwaXwCaIQ-ivKNms6PJek4wCnV9dUOXktFTyK1ZKts/edit?gid=549650849#gid=549650849';
 function openSheet(e){
   e.preventDefault();
   if(!SHEET_URL){ alert('尚未設定 Excel 表單網址，請在 index.html 的 SHEET_URL 填入 Google Sheet 連結'); return; }
@@ -609,7 +609,7 @@ function fileToBase64_(file){
   });
 }
 
-const BATCH_SIZE = ENABLE_CLIENT_SPLIT ? 5 : 1; // 沒有先拆分的話，一個檔案可能就很大，一次只送一個檔案，讓它獨享整個 6 分鐘執行時間
+const PAID_PAGE_RANGE_SIZE = 50; // 付費模式下，超過這個頁數的檔案會拆成多次「同一份檔案、不同頁碼範圍」的請求送出（不是切檔案），確保每次請求都能在合理時間內完成、拿到回應，不會卡在同一條連線上等到逾時斷線
 const VISION_EST_USD_PER_1000_PAGES = 1.5; // 只用於顯示「大概金額」給使用者參考，不是精確計費，實際費用以 Google 帳單為準
 
 // 從警示/異常的檔名（可能帶有「（第N頁）」這種後綴）比對回原始佇列項目，且不重複
@@ -658,21 +658,40 @@ async function startUpload(mode, queueOverride){
 
   const totals = { inserted:0, duplicateCount:0, duplicates:[], needsReview:[], failed:[], warnings:[] };
   const sortedQueue = [...currentQueue].sort((a,b)=> a.file.name.localeCompare(b.file.name));
-  const chunks = [];
-  for(let i=0;i<sortedQueue.length;i+=BATCH_SIZE) chunks.push(sortedQueue.slice(i,i+BATCH_SIZE));
+
+  // 付費模式下，超過 PAID_PAGE_RANGE_SIZE 頁的檔案，會拆成好幾次「同一份檔案內容、不同頁碼範圍」的請求，
+  // 每次只請 Vision API 處理一小段頁碼範圍，確保單次執行時間夠短、瀏覽器不會一路等到連線逾時斷掉。
+  // 注意：這裡不是「切檔案」——完全不會動到 PDF 本身的位元組內容，跟免費版當初「重新存檔切分會弄壞內容」是兩回事。
+  const requestList = []; // 展開後的實際請求清單：{ q, base64, rangeStart?, rangeEnd?, rangeLabel? }
+  for(const q of sortedQueue){
+    const base64 = await fileToBase64_(q.file);
+    const totalPages = q.pageCount || 1;
+    if(mode !== 'paid' || totalPages <= PAID_PAGE_RANGE_SIZE){
+      requestList.push({ q, base64 });
+      continue;
+    }
+    for(let start=1; start<=totalPages; start+=PAID_PAGE_RANGE_SIZE){
+      const end = Math.min(start + PAID_PAGE_RANGE_SIZE - 1, totalPages);
+      requestList.push({ q, base64, rangeStart: start, rangeEnd: end, rangeLabel: `（第${start}~${end}頁／共${totalPages}頁）` });
+    }
+  }
 
   try{
-    for(let c=0; c<chunks.length; c++){
-      const chunk = chunks[c];
-      if(btn) btn.textContent = `${mode === 'paid' ? '付費' : '免費'}解析上傳中...（${Math.min((c+1)*BATCH_SIZE, currentQueue.length)}/${currentQueue.length}）`;
-      if(!isRetry) chunk.forEach(q=> { const el = document.getElementById('qstatus-'+q.id); if(el) el.textContent = '處理中'; });
+    for(let c=0; c<requestList.length; c++){
+      // 免費版每個檔案都要走一次 OCR 轉檔，連續密集送出容易撞到 Google 的短時間流量限制，
+      // 送出中間刻意間隔幾秒，讓步調慢下來（付費版走 Vision API，目前沒有觀察到同樣的狀況，不額外拖慢）
+      if(c > 0 && mode !== 'paid'){
+        await new Promise(resolve => setTimeout(resolve, 3000));
+      }
+      const req = requestList[c];
+      const q = req.q;
+      if(btn) btn.textContent = `${mode === 'paid' ? '付費' : '免費'}解析上傳中...（${c+1}/${requestList.length}）`;
+      if(!isRetry && !req.rangeStart) { const el = document.getElementById('qstatus-'+q.id); if(el) el.textContent = '處理中'; }
 
-      const items = await Promise.all(chunk.map(async q=>{
-        const base64 = await fileToBase64_(q.file);
-        const item = { carrierType: 'auto', filename: q.file.name, pageCount: q.pageCount || undefined };
-        item[q.kind === 'zip' ? 'zipBase64' : 'pdfBase64'] = base64;
-        return item;
-      }));
+      const item = { carrierType: 'auto', filename: q.file.name + (req.rangeLabel || ''), pageCount: q.pageCount || undefined };
+      if(req.rangeStart){ item.pageRangeStart = req.rangeStart; item.pageRangeEnd = req.rangeEnd; }
+      item[q.kind === 'zip' ? 'zipBase64' : 'pdfBase64'] = req.base64;
+      const items = [item];
 
       const res = await fetch(apiUrl, {
         method:'POST',
@@ -680,7 +699,7 @@ async function startUpload(mode, queueOverride){
         body: JSON.stringify(items)
       });
       const data = await res.json();
-      if(!data.success) throw new Error(`第 ${c+1}/${chunks.length} 批上傳失敗：${data.error || '未知錯誤'}`);
+      if(!data.success) throw new Error(`第 ${c+1}/${requestList.length} 批上傳失敗：${data.error || '未知錯誤'}`);
 
       totals.inserted += data.insertedCount;
       totals.duplicateCount += data.duplicateCount;
