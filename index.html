@@ -663,4 +663,167 @@ async function startUpload(mode, queueOverride){
   const apiUrl = mode === 'paid' ? API_URL_PAID : API_URL_FREE;
   const isRetry = !!queueOverride; // 是不是「免費版失敗後，改用付費API重跑」這個流程
 
-  if(!apiUrl || !apiUrl.startsWith('http')){ await showSummaryModal
+  if(!apiUrl || !apiUrl.startsWith('http')){ await showSummaryModal_(`尚未設定${mode === 'paid' ? '付費版' : '免費版'}後端網址，請確認 API_URL_${mode === 'paid' ? 'PAID' : 'FREE'} 已填入正確的網址`); return; }
+
+  const currentQueue = queueOverride || queue;
+  if(currentQueue.length===0){ await showSummaryModal_('請先加入要上傳的 PDF 檔案'); return; }
+
+  if(mode === 'paid'){
+    const confirmed = await confirmPaidUsage_(currentQueue);
+    if(!confirmed) return;
+  }
+
+  const btn = document.getElementById('parse-btn');
+  const original = btn ? btn.textContent : '';
+  if(btn) btn.disabled = true;
+  if(!isRetry) currentQueue.forEach(q=> { const el = document.getElementById('qstatus-'+q.id); if(el) el.textContent = '排隊中'; });
+
+  const totals = { inserted:0, duplicateCount:0, duplicates:[], needsReview:[], failed:[], warnings:[] };
+  const sortedQueue = [...currentQueue].sort((a,b)=> a.file.name.localeCompare(b.file.name));
+
+  // 付費模式下，超過 PAID_PAGE_RANGE_SIZE 頁的檔案，會被真的切成好幾份小 PDF（sliceRangePdf_），每份各自送出一次請求，
+  // 每次只請 Vision API 處理這份小檔案的內容，確保單次執行時間夠短、payload 也夠小，瀏覽器不會一路等到連線逾時斷掉。
+  // pageOffset 記錄這份小檔案在「原始檔案」裡是從第幾頁開始，純粹只是為了讓後端回報的 blankPages / 錯誤訊息能標出
+  // 正確的原始頁碼，不影響實際讀取邏輯。
+  const requestList = []; // 展開後的實際請求清單：{ q, base64, pageOffset?, slicedPageCount?, rangeLabel? }
+  for(const q of sortedQueue){
+    const totalPages = q.pageCount || 1;
+    if(mode !== 'paid' || totalPages <= PAID_PAGE_RANGE_SIZE){
+      const base64 = await fileToBase64_(q.file);
+      requestList.push({ q, base64 });
+      continue;
+    }
+    for(let start=1; start<=totalPages; start+=PAID_PAGE_RANGE_SIZE){
+      const end = Math.min(start + PAID_PAGE_RANGE_SIZE - 1, totalPages);
+      const sliceFile = await sliceRangePdf_(q.file, start, end);
+      const base64 = await fileToBase64_(sliceFile);
+      requestList.push({
+        q, base64,
+        pageOffset: start - 1,
+        slicedPageCount: end - start + 1,
+        rangeLabel: `（第${start}~${end}頁／共${totalPages}頁）`
+      });
+    }
+  }
+
+  try{
+    for(let c=0; c<requestList.length; c++){
+      // 免費版每個檔案都要走一次 OCR 轉檔，連續密集送出容易撞到 Google 的短時間流量限制，
+      // 送出中間刻意間隔幾秒，讓步調慢下來（付費版走 Vision API，目前沒有觀察到同樣的狀況，不額外拖慢）
+      if(c > 0 && mode !== 'paid'){
+        await new Promise(resolve => setTimeout(resolve, 3000));
+      }
+      const req = requestList[c];
+      const q = req.q;
+      if(btn) btn.textContent = `${mode === 'paid' ? '付費' : '免費'}解析上傳中...（${c+1}/${requestList.length}）`;
+      if(!isRetry && !req.rangeLabel) { const el = document.getElementById('qstatus-'+q.id); if(el) el.textContent = '處理中'; }
+
+      const item = { carrierType: 'auto', filename: q.file.name + (req.rangeLabel || ''), pageCount: req.slicedPageCount || q.pageCount || undefined };
+      if(req.pageOffset){ item.pageOffset = req.pageOffset; }
+      item[q.kind === 'zip' ? 'zipBase64' : 'pdfBase64'] = req.base64;
+      const items = [item];
+
+      const res = await fetch(apiUrl, {
+        method:'POST',
+        headers:{ 'Content-Type':'text/plain;charset=utf-8' }, // 避免觸發瀏覽器 CORS 預檢請求
+        body: JSON.stringify(items)
+      });
+      const data = await res.json();
+      if(!data.success) throw new Error(`第 ${c+1}/${requestList.length} 批上傳失敗：${data.error || '未知錯誤'}`);
+
+      totals.inserted += data.insertedCount;
+      totals.duplicateCount += data.duplicateCount;
+      totals.duplicates.push(...(data.duplicates?.first5 || []), ...(data.duplicates?.last5 || []));
+      totals.needsReview.push(...(data.needsReview || []));
+      totals.failed.push(...(data.failed || []));
+      totals.warnings.push(...(data.warnings || []));
+    }
+
+    let msg = `全部上傳完成（${mode === 'paid' ? '付費 API' : '免費 OCR'}）：新增 ${totals.inserted} 筆`;
+    if(totals.duplicateCount > 0){
+      msg += `，重複略過 ${totals.duplicateCount} 筆（訂單編號已存在，不重複列出）`;
+    }
+
+    // 把警示/異常訊息依「問題類型」歸類，同一種問題只描述一次，底下列出檔名（依字母排序），比較省版面
+    function normalizeReason_(reason){
+      if(/頁數.*但只拆出|可能有頁面因為關鍵字/.test(reason)) return '瀏覽器偵測頁數跟拆出張數不符，可能有面單被誤合併，建議人工複查';
+      if(/這一頁.*沒有讀到任何文字/.test(reason)) return '這幾頁 Vision API 沒有讀到任何文字，建議人工複查';
+      if(/無法自動判斷物流商/.test(reason)) return '無法自動判斷物流商，請手動指定';
+      if(/抓不到任何文字內容/.test(reason)) return 'PDF 抓不到文字內容（可能是圖片型 PDF，OCR 也沒抓到）';
+      return reason;
+    }
+    function groupByReason_(list){
+      const groups = {};
+      list.forEach(item=>{
+        const key = normalizeReason_(item.reason || '未知原因');
+        (groups[key] = groups[key] || []).push(item.filename);
+      });
+      return Object.entries(groups).map(([reason, names])=>{
+        names.sort((a,b)=>a.localeCompare(b));
+        return `【${reason}】共 ${names.length} 筆\n${names.join('、')}`;
+      });
+    }
+
+    if(totals.warnings.length){
+      msg += `\n\n🔍 需人工複查（共 ${totals.warnings.length} 筆）：\n` + groupByReason_(totals.warnings).join('\n\n');
+    }
+
+    const anomalies = [...totals.needsReview, ...totals.failed]; // 無法判斷物流商 + 其他解析失敗，合併當作「異常」處理
+    const allProblems = [...totals.warnings, ...anomalies]; // 「需人工複查」+「異常」都算是「這次沒有完整處理好」，可以拿去給付費版重跑
+
+    if(anomalies.length || (mode === 'free' && totals.warnings.length)){
+      if(anomalies.length){
+        msg += `\n\n⚠️ 異常（共 ${anomalies.length} 筆）：\n` + groupByReason_(anomalies).join('\n\n');
+      }
+
+      const buttons = [
+        { label: '整批重新排入佇列', value: 'requeue' },
+        { label: `排除問題 ${allProblems.length} 筆`, value: 'exclude', primary: mode === 'paid' }
+      ];
+      // 只有「免費模式」跑出問題時，才提供「改用付費API重新處理」這個選項；付費模式本身跑出的問題，不會再有更貴的選項可以往上升級
+      if(mode === 'free' && allProblems.length && API_URL_PAID && API_URL_PAID.startsWith('http')){
+        buttons.push({ label: `改用付費API重新處理這 ${allProblems.length} 筆`, value: 'retry-paid', primary: true });
+      }
+
+      const choice = await showSummaryModal_(msg, buttons);
+
+      if(choice === 'retry-paid'){
+        const matched = matchQueueItemsByLabel_(currentQueue, allProblems.map(p=>p.filename));
+        if(!isRetry) { queue = []; renderQueue(); } // 免費版這批先從佇列移除，避免混淆
+        if(btn){ btn.textContent = original; btn.disabled = false; }
+        await startUpload('paid', matched); // 遞迴呼叫，直接用付費模式重跑這幾份原始檔案
+        return;
+      } else if(choice === 'requeue'){
+        if(!isRetry) queue = currentQueue; // 整批放回佇列，交給重複判斷機制去避免真正重複寫入
+      } else {
+        if(!isRetry) queue = [];
+      }
+    } else {
+      await showSummaryModal_(msg);
+      if(!isRetry) queue = [];
+    }
+
+    if(!isRetry){
+      renderQueue();
+    }
+    renderStats();
+    renderTrend();
+  }catch(err){
+    await showSummaryModal_('上傳中斷：'+ err.message + '\n\n已成功送出的批次不會受影響，可以重新整理頁面或再次點擊上傳處理剩餘檔案。');
+  }finally{
+    if(btn){ btn.textContent = original; btn.disabled = false; }
+  }
+}
+
+/* ---------- init ---------- */
+(function initDefaults_(){
+  const today = new Date();
+  document.getElementById('stat-start').value = toDateStr_(startOfMonth_(today)); // 預設當月1號
+  document.getElementById('stat-end').value = toDateStr_(today); // 預設今天
+})();
+onUnitChange();
+renderStats();
+renderTrend();
+</script>
+</body>
+</html>
