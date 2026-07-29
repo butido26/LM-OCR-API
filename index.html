@@ -188,9 +188,9 @@
       <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
         <input type="radio" name="ocr-mode" value="free" checked> 免費 OCR 辨識
       </label>
-      <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-        <input type="radio" name="ocr-mode" value="paid"> 付費 API 辨識
-        <span style="color:#999; font-size:12px;">（Vision API，依實際頁數計費，送出前會再次確認）</span>
+      <label id="paid-mode-label" style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+        <input type="radio" name="ocr-mode" value="paid" id="paid-mode-radio"> 付費 API 辨識
+        <span id="paid-mode-hint" style="color:#999; font-size:12px;">（Vision API，依實際頁數計費，送出前會再次確認）</span>
       </label>
     </div>
     <div class="dropzone" id="dropzone">
@@ -815,6 +815,41 @@ async function startUpload(mode, queueOverride){
   }
 }
 
+/* ---------- 檢查付費模式是否可用（有沒有設定 Vision API 金鑰） ----------
+   金鑰存在付費版 Apps Script 的「指令碼屬性」裡，前端讀不到金鑰本身，只能問後端「有沒有設定」。
+   查不到金鑰、或後端根本連不上（例如 API_URL_PAID 還沒填、網路問題），一律當作付費模式不可用，
+   反灰選項並把提示文字換成免費版的頁數上限說明，避免使用者選了付費卻送出才發現失敗。 */
+const FREE_MAX_PAGES_HINT = '（免費版單次上傳約 80 頁為上限，超過建議分批上傳；付費 API 目前未啟用）';
+async function checkPaidModeStatus_(){
+  const label = document.getElementById('paid-mode-label');
+  const radio = document.getElementById('paid-mode-radio');
+  const hint = document.getElementById('paid-mode-hint');
+  if(!label || !radio || !hint) return;
+
+  function disablePaidMode(){
+    radio.disabled = true;
+    if(radio.checked){ // 如果使用者上次選的是付費，金鑰被拿掉後要自動切回免費，不能讓表單卡在一個選不了的選項上
+      const freeRadio = document.querySelector('input[name="ocr-mode"][value="free"]');
+      if(freeRadio) freeRadio.checked = true;
+    }
+    label.style.opacity = '0.45';
+    label.style.cursor = 'not-allowed';
+    hint.textContent = FREE_MAX_PAGES_HINT;
+  }
+
+  if(!API_URL_PAID || !API_URL_PAID.startsWith('http')){ disablePaidMode(); return; }
+
+  try{
+    const res = await fetch(`${API_URL_PAID}?action=paidStatus`);
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    const data = await res.json();
+    if(!data.enabled) disablePaidMode();
+  }catch(err){
+    console.warn('無法確認付費模式狀態，先當作不可用', err);
+    disablePaidMode();
+  }
+}
+
 /* ---------- init ---------- */
 (function initDefaults_(){
   const today = new Date();
@@ -824,6 +859,7 @@ async function startUpload(mode, queueOverride){
 onUnitChange();
 renderStats();
 renderTrend();
+checkPaidModeStatus_();
 </script>
 </body>
 </html>
