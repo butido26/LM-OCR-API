@@ -651,7 +651,28 @@ function matchQueueItemsByLabel_(sourceQueue, labels){
 async function confirmPaidUsage_(items){
   const totalPages = items.reduce((sum,q)=> sum + (q.pageCount || 1), 0);
   const estCost = (totalPages / 1000 * VISION_EST_USD_PER_1000_PAGES).toFixed(2);
-  const msg = `即將使用付費 Vision API 辨識\n\n檔案數：${items.length} 個\n預估總頁數：約 ${totalPages} 頁\n預估費用：約 US$${estCost}（僅供參考，實際費用以 Google Cloud 帳單為準）\n\n確定要送出嗎？`;
+  let msg = `即將使用付費 Vision API 辨識\n\n檔案數：${items.length} 個\n預估總頁數：約 ${totalPages} 頁\n預估費用：約 US$${estCost}（僅供參考，實際費用以 Google Cloud 帳單為準）`;
+
+  // 查一下今日剩餘額度，順便加進同一個確認視窗，不額外加畫面元件，保持介面乾淨
+  try{
+    const res = await fetch(`${API_URL_PAID}?action=quotaStatus`);
+    if(res.ok){
+      const q = await res.json();
+      if(q.limitSet){
+        msg += `\n\n今日額度：剩餘 ${q.remaining} 頁`;
+        if(totalPages > q.remaining){
+          // 後端是每5頁一組去卡額度，不是精準卡到頁，所以這裡是預估值，實際會處理到的頁數可能比 remaining 再少個1~4頁
+          const shortBy = totalPages - q.remaining;
+          const doneEst = totalPages - shortBy;
+          msg += `\n⚠️ 預估無法完整處理約 ${shortBy} 頁，已成功處理的約 ${doneEst} 頁，明天若重新上傳整份檔案會重複產生 Vision API 費用（不會寫入重複資料）`;
+        }
+      }
+    }
+  }catch(err){
+    console.warn('查詢今日額度失敗，略過不顯示', err); // 查不到就不顯示這段，不影響原本的確認流程
+  }
+
+  msg += `\n\n確定要送出嗎？`;
   return await showSummaryModal_(msg, [
     { label: '取消', value: false },
     { label: '確定使用付費API', value: true, primary: true }
