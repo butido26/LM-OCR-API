@@ -792,7 +792,13 @@ async function startUpload(mode, queueOverride){
 
     let msg = `全部上傳完成（${mode === 'paid' ? '付費 API' : '免費 OCR'}）：新增 ${totals.inserted} 筆`;
     if(totals.duplicateCount > 0){
-      msg += `，重複略過 ${totals.duplicateCount} 筆（訂單編號已存在，不重複列出）`;
+      const DUP_LIST_LIMIT = 20; // 超過這個數量只顯示前面幾筆，避免重複筆數很多時把畫面塞爆
+      const dupNumbers = totals.duplicates.slice(0, DUP_LIST_LIMIT);
+      let dupText = dupNumbers.join('、');
+      if(totals.duplicates.length > DUP_LIST_LIMIT){
+        dupText += `　等共 ${totals.duplicateCount} 筆`;
+      }
+      msg += `，重複略過 ${totals.duplicateCount} 筆（訂單編號已存在）：\n${dupText}`;
     }
 
     // 把警示/異常訊息依「問題類型」歸類，同一種問題只描述一次，底下列出檔名（依字母排序），比較省版面
