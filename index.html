@@ -734,7 +734,8 @@ async function startUpload(mode, queueOverride){
   if(!isRetry) currentQueue.forEach(q=> { const el = document.getElementById('qstatus-'+q.id); if(el) el.textContent = '排隊中'; });
 
   const totals = { inserted:0, duplicateCount:0, duplicates:[], needsReview:[], failed:[], warnings:[] };
-  const sortedQueue = [...currentQueue].sort((a,b)=> a.file.name.localeCompare(b.file.name));
+  // 維持使用者加入佇列的原始順序（上傳/拖曳的先後），不再依檔名重新排序
+  const sortedQueue = [...currentQueue];
 
   // 付費模式下，超過 PAID_PAGE_RANGE_SIZE 頁的檔案，會被真的切成好幾份小 PDF（sliceRangePdf_），每份各自送出一次請求，
   // 每次只請 Vision API 處理這份小檔案的內容，確保單次執行時間夠短、payload 也夠小，瀏覽器不會一路等到連線逾時斷掉。
@@ -796,6 +797,9 @@ async function startUpload(mode, queueOverride){
 
     // 把警示/異常訊息依「問題類型」歸類，同一種問題只描述一次，底下列出檔名（依字母排序），比較省版面
     function normalizeReason_(reason){
+      // 系統層級的程式錯誤（不是資料本身的問題，例如剛好遇到後端程式碼更新中），
+      // 用比較不嚇人的說法呈現，不要讓使用者誤以為是自己的檔案有問題
+      if(/ReferenceError|is not defined|執行中途出錯/.test(reason)) return '系統暫時發生問題（可能剛好遇到後端更新中），已成功處理的資料不受影響，請稍後重新上傳這幾筆';
       if(/頁數.*但只拆出|可能有頁面因為關鍵字/.test(reason)) return '瀏覽器偵測頁數跟拆出張數不符，可能有面單被誤合併，建議人工複查';
       if(/這一頁.*沒有讀到任何文字/.test(reason)) return '這幾頁 Vision API 沒有讀到任何文字，建議人工複查';
       if(/無法自動判斷物流商/.test(reason)) return '無法自動判斷物流商，請手動指定';
@@ -809,8 +813,10 @@ async function startUpload(mode, queueOverride){
         (groups[key] = groups[key] || []).push(item.filename);
       });
       return Object.entries(groups).map(([reason, names])=>{
-        names.sort((a,b)=>a.localeCompare(b));
-        return `【${reason}】共 ${names.length} 筆\n${names.join('、')}`;
+        // 檔名去重再顯示：系統層級錯誤常常每一筆都是同一個沒有意義的佔位檔名（例如「（整體請求）」），
+        // 列出15次一樣的字沒有幫助；筆數還是照實際發生次數算，只有顯示的名稱清單去重
+        const uniqueNames = [...new Set(names)].sort((a,b)=>a.localeCompare(b));
+        return `【${reason}】共 ${names.length} 筆\n${uniqueNames.join('、')}`;
       });
     }
 
