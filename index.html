@@ -806,6 +806,9 @@ async function startUpload(mode, queueOverride){
       // 系統層級的程式錯誤（不是資料本身的問題，例如剛好遇到後端程式碼更新中），
       // 用比較不嚇人的說法呈現，不要讓使用者誤以為是自己的檔案有問題
       if(/ReferenceError|is not defined|執行中途出錯/.test(reason)) return '系統暫時發生問題（可能剛好遇到後端更新中），已成功處理的資料不受影響，請稍後重新上傳這幾筆';
+      // OCR 短時間流量限制：Google 回傳的 JSON 內容每次欄位順序可能不一樣，用完整字串比對會被拆成
+      // 好幾組看起來不一樣的錯誤，改用關鍵字判斷，同一類錯誤才能正確合併成一組
+      if(/User rate limit exceeded for OCR|userRateLimitExceeded/.test(reason)) return 'OCR 短時間流量限制（連續上傳觸發，已自動重試但仍失敗），建議稍後單獨重新上傳這幾筆，或間隔久一點再送';
       if(/頁數.*但只拆出|可能有頁面因為關鍵字/.test(reason)) return '瀏覽器偵測頁數跟拆出張數不符，可能有面單被誤合併，建議人工複查';
       if(/這一頁.*沒有讀到任何文字/.test(reason)) return '這幾頁 Vision API 沒有讀到任何文字，建議人工複查';
       if(/無法自動判斷物流商/.test(reason)) return '無法自動判斷物流商，請手動指定';
