@@ -190,12 +190,12 @@
       </label>
       <label id="paid-mode-label" style="display:flex; align-items:center; gap:6px; cursor:pointer;">
         <input type="radio" name="ocr-mode" value="paid" id="paid-mode-radio"> 付費 API 辨識
-        <span id="paid-mode-hint" style="color:#999; font-size:12px;">（Vision API，依實際頁數計費，送出前會再次確認）</span>
+        <span id="paid-mode-hint" style="color:#999; font-size:12px;">（Vision API，送出前會再次確認頁數與預估費用）</span>
       </label>
     </div>
     <div class="dropzone" id="dropzone">
       <div class="headline">＋ 將物流PDF面單拖曳至此，或點擊選擇檔案</div>
-      <div class="sub">PDF可以一張或一份多頁的資料上傳，較大的檔案會自動先拆成小份再送出</div>
+      <div class="sub">（免費版上傳建議一次50筆內，付費版則不受限制）</div>
       <input type="file" id="file-input" accept="application/pdf" multiple hidden>
     </div>
     <div id="queue-list" style="text-align:left; margin-top:14px;"></div>
@@ -270,7 +270,7 @@
 
 </main>
 
-<footer>圖表為Excel明細資料</footer>
+<footer>圖表顯示為Excel明細資料轉換</footer>
 
 <script>
 Chart.register(ChartDataLabels);
@@ -601,7 +601,7 @@ function renderQueue(){
   if(queue.length > QUEUE_LIST_THRESHOLD){
     el.innerHTML = `
       <div class="queue-row">
-        <span class="fname">已加入 <b>${queue.length}</b> 個檔案（含自動拆分後的份數；物流商將依內容自動判斷，數量較多不逐筆列出）</span>
+        <span class="fname">已加入 <b>${queue.length}</b> 個檔案（超過${QUEUE_LIST_THRESHOLD}筆數量較多不逐筆列出）</span>
         <button class="remove" onclick="clearQueue()" style="font-size:13px;">清空全部</button>
       </div>`;
     return;
@@ -738,6 +738,8 @@ async function startUpload(mode, queueOverride){
   if(!isRetry) currentQueue.forEach(q=> { const el = document.getElementById('qstatus-'+q.id); if(el) el.textContent = '排隊中'; });
 
   const totals = { inserted:0, duplicateCount:0, duplicates:[], needsReview:[], failed:[], warnings:[] };
+  let lastCompletedFilename = ''; // 記錄目前為止最後一個成功處理完的檔名，中斷時用來告訴使用者處理到哪裡了
+  let completedCount = 0; // 已經成功處理完的檔案數，中斷時搭配 requestList.length 顯示「已上傳 x/y」
   // 維持使用者加入佇列的原始順序（上傳/拖曳的先後），不再依檔名重新排序
   const sortedQueue = [...currentQueue];
 
@@ -785,6 +787,8 @@ async function startUpload(mode, queueOverride){
       const items = [item];
 
       const data = await sendBatchWithRetry_(apiUrl, items, `第 ${c+1}/${requestList.length} 批`);
+      lastCompletedFilename = q.file.name; // 這一筆成功送出、拿到回應了，記下來
+      completedCount++;
 
       totals.inserted += data.insertedCount;
       totals.duplicateCount += data.duplicateCount;
@@ -878,7 +882,10 @@ async function startUpload(mode, queueOverride){
     renderStats();
     renderTrend();
   }catch(err){
-    await showSummaryModal_('上傳中斷：'+ err.message + '\n\n已成功送出的批次不會受影響，可以重新整理頁面或再次點擊上傳處理剩餘檔案。');
+    const msg = lastCompletedFilename
+      ? `執行中斷，已上傳 ${completedCount}/${requestList.length}，最後完成檔案是「${lastCompletedFilename}」，你可以繼續上傳尚未處理的檔案`
+      : `執行中斷，已上傳 0/${requestList.length}，尚未有檔案完成，你可以重新上傳試試看`;
+    await showSummaryModal_(msg);
   }finally{
     if(btn){ btn.textContent = original; btn.disabled = false; }
   }
